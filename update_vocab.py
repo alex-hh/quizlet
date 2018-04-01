@@ -1,93 +1,72 @@
 import os
 import re
+import argparse
+
 from unicodedata import normalize
 
-import requests
-import enchant
-from googletrans import Translator
+from quizlet_interface import QuizletUpdater
 
 # based on scripts at https://github.com/tdomhan/pyquizlet
 filename = '/Users/alexhooker/Dropbox/Public/notes/french words dictionary.txt'
 
-d = enchant.Dict('fr_FR')
-
-vocab = {}
-
-def checka(prev_w):
-    preceders = ['qui', 'il', 'on', 'y', 'en', 'm', 't']
-    if prev_w in preceders:
-        return 'a'
-    return 'à'
-
-def add_accents(phr):
-    output = []
-    words = normalize('NFKD',phr).split(' ')
-    for i, w in enumerate(words):
-        if w:
-            if w == 'a':
-                output.append(checka(words[i-1]))
-            elif d.check(w):
-                output.append(w)
-            else:
-                wout = w
-                suggestions = d.suggest(w)
-                unaccented_suggestions = [normalize('NFD', s).encode('ascii', 'ignore').decode() for s in suggestions]
-                for sugg, poss_match in zip(suggestions, unaccented_suggestions):
-                    if poss_match == w:
-                        wout = sugg
-                        break
-                output.append(wout)
-    return ' '.join(output)
-
-def translate(text):
-    translator = Translator()
-    if type(text)==str:
-        return translator.translate(text, src='fr', dest='en').text
-    elif type(text)==list:
-        return [w.text for w in translator.translate(text, src='fr', dest='en')]
-
-def get_quizlet_list():
-    api_key = os.environ['QUIZLET_API']
-    params = {'client_id': api_key}
-    api_base = 'https://api.quizlet.com/2.0/'
-    r = requests.get(api_base + 'sets/5219389', params=params)
-    term_dicts = r.json()['terms']
-    phrs = [re.sub(':','',d['term']).lower() for d in term_dicts]
-    ids = [int(d['id']) for d in term_dicts]
-    defs = [d['definition'] for d in term_dicts]
-    return phrs, ids, defs
-
+# 236321717 constructions
+# 282610606
+#282610676
 if __name__ == '__main__':
-    new_defs = []
-    with open(filename, 'r') as f:
-        for line in f:
-            defs = line.rstrip('\n').split(': ')
-            if len(defs) > 1:
-                phrase, meaning = defs
-                vocab[add_accents(phrase.lower())] = meaning
-            else:
-                phrase = add_accents(re.sub(':', '', defs[0])).lower()
-                meaning = translate(phrase)
-                new_defs.append((phrase, meaning))
-                print(phrase, meaning)
-                vocab[phrase] = meaning
-    sorted_vocab = sorted([w for w in vocab], 
-                          key=lambda w: normalize('NFD', w).encode('ascii', 'ignore').decode())
-    with open(filename, 'w') as f:
-        for v in sorted_vocab:
-            f.write('{}: {}\n'.format(v, vocab[v]))
+    parser = argparse.ArgumentParser()
+    # parser.add_argument("text_file", help="Name of the file where definitions are stored",)
+    # parser.add_argument("username")
+    parser.add_argument("--full_set", default=5219389) # 
+    parser.add_argument("--keep_text", action="store_false")
+    parser.add_argument("--split_quizlet", help="save to separate quizlet sets by word type", action="store_true")
+    # parser.add_argument("--words_set", help="quizlet id of words set", default=None)
+    # parser.add_argument("--phrases_set", help="quizlet id of phrases set", default=None)
+    # parser.add_argument("--const_set", help="quizlet id of construction set", default=None)
+    parser.add_argument("--translator", help="which translation api to use: google, linguee", default=None)
+    parser.add_argument("--split_txt", help="save text files split by phrase type", action="store_true")
+    args = parser.parse_args()
+    if args.split_quizlet:
+        words_set = 282610676
+        constructions_set = 236321717
+        phrases_set = 282610606
+    updater = QuizletUpdater(filename, args.full_set,
+                             words_set_id=words_set,
+                             phrases_set_id=phrases_set,
+                             const_set_id=constructions_set,
+                             translator=args.translator,
+                             split_txt=args.split_txt) # split_txt will only be True if the arg --split_txt is passed
+    updater.update()
 
-    print('New definitions:', new_defs)
+    # new_defs = []
+    # with open(filename, 'r') as f:
+    #     for line in f:
+    #         defs = line.rstrip('\n').split(': ')
+    #         if len(defs) > 1:
+    #             phrase, meaning = defs
+    #             vocab[add_accents(phrase.lower())] = meaning
+    #         else:
+    #             phrase = add_accents(re.sub(':', '', defs[0])).lower()
+    #             meaning = translate(phrase)
+    #             new_defs.append((phrase, meaning))
+    #             print(phrase, meaning)
+    #             vocab[phrase] = meaning
+    # sorted_vocab = sorted([w for w in vocab], 
+    #                       key=lambda w: normalize('NFD', w).encode('ascii', 'ignore').decode())
+    # with open(filename, 'w') as f:
+    #     for v in sorted_vocab:
+    #         f.write('{}: {}\n'.format(v, vocab[v]))
 
-    quizlet_phrs, quizlet_ids, quizlet_defs = get_quizlet_list()
-    start_id = max(quizlet_ids) + 1
-    new_phrs = [phr for phr in vocab.keys() if phr not in quizlet_phrs]
-    token = os.environ['QUIZLET_ACCESS']
-    for phr in new_phrs:
-        headers = {'Authorization': 'Bearer {}'.format(token)}
-        params = {'term': phr,
-                  'definition':vocab[phr]}
-        r = requests.post('https://api.quizlet.com/2.0/sets/5219389/terms',
-                          headers=headers, params=params)
+    # print('New definitions:', new_defs)
+
+    # quizlet_phrs, quizlet_ids, quizlet_defs = get_quizlet_list()
+    # start_id = max(quizlet_ids) + 1
+    # new_phrs = [phr for phr in vocab.keys() if phr not in quizlet_phrs]
+    # token = os.environ['QUIZLET_ACCESS']
+    # for phr in new_phrs:
+    #     headers = {'Authorization': 'Bearer {}'.format(token)}
+    #     params = {'term': phr,
+    #               'definition':vocab[phr]}
+    #     r = requests.post('https://api.quizlet.com/2.0/sets/5219389/terms',
+    #                       headers=headers, params=params)
 
 
